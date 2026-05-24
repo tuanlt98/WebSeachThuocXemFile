@@ -284,6 +284,13 @@
     </svg>
     Chọn thư mục Excel
   </button>
+  <button class="btn btn-pdf" id="btnPdfFolder" title="Chọn thư mục chứa file PDF để xem trực tiếp (không cần server.py)">
+    <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+      <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
+      <path d="M14 2v6h6M12 18v-6M9 15l3-3 3 3"/>
+    </svg>
+    <span id="btnPdfFolderLabel">Chọn thư mục PDF</span>
+  </button>
   <span class="btn-pdf-hint" id="pdfModeLabel" title="Chạy server.py để đọc file PDF cục bộ theo đường dẫn"></span>
 
   <div class="search-wrap">
@@ -1081,6 +1088,41 @@ function onRowClick(tr, idx) {
 }
 
 // ═══════════════════════════════════════════════════════════════
+//  PDF FOLDER — File System Access API (không cần server.py)
+// ═══════════════════════════════════════════════════════════════
+async function scanPdfDir(dirHandle) {
+  for await (const [name, handle] of dirHandle.entries()) {
+    if (handle.kind === 'file' && /\.pdf$/i.test(name)) {
+      pdfFileMap.set(name.toLowerCase(), handle);
+    } else if (handle.kind === 'directory') {
+      await scanPdfDir(handle);   // quét đệ quy thư mục con
+    }
+  }
+}
+
+document.getElementById('btnPdfFolder').onclick = async function() {
+  if (!window.showDirectoryPicker) {
+    alert('Tính năng này cần Chrome hoặc Edge (phiên bản 86 trở lên).\nFirefox chưa hỗ trợ.');
+    return;
+  }
+  try {
+    const lbl = document.getElementById('btnPdfFolderLabel');
+    const dirHandle = await window.showDirectoryPicker({ mode: 'read' });
+    pdfFileMap.clear();
+    pdfCache.clear();
+    lbl.textContent = 'Đang quét...';
+    await scanPdfDir(dirHandle);
+    const count = pdfFileMap.size;
+    lbl.textContent = count > 0 ? `PDF: ${count} file` : 'Chọn thư mục PDF';
+    if (count === 0)
+      alert(`Không tìm thấy file .pdf nào trong "${dirHandle.name}".`);
+  } catch(e) {
+    if (e.name !== 'AbortError') alert('Lỗi: ' + e.message);
+    document.getElementById('btnPdfFolderLabel').textContent = 'Chọn thư mục PDF';
+  }
+};
+
+// ═══════════════════════════════════════════════════════════════
 //  PDF OPEN
 // ═══════════════════════════════════════════════════════════════
 async function openPdf(filePath) {
@@ -1096,10 +1138,24 @@ async function openPdf(filePath) {
 
   setPdfState('loading');
 
+  // ── 2. File System Access API (thư mục PDF đã chọn) ──────────
+  if (pdfFileMap.has(key)) {
+    try {
+      const file = await pdfFileMap.get(key).getFile();
+      const buf  = await file.arrayBuffer();
+      const doc  = await pdfjsLib.getDocument({ data: new Uint8Array(buf) }).promise;
+      pdfCache.set(key, { doc });
+      await displayPdfDoc(doc, filename);
+    } catch(err) {
+      showPdfError(`Lỗi đọc file PDF:\n${err.message}\n\nFile: ${filename}`);
+    }
+    return;
+  }
+
   try {
     let pdfSource = null;
 
-    // ── 2. Local server (khi chạy qua server.py) ────────────────
+    // ── 3. Local server (khi chạy qua server.py) ────────────────
     if (isLocalhost()) {
       const url = `${window.location.origin}/local-file?path=${encodeURIComponent(filePath)}`;
       try {
@@ -1128,7 +1184,8 @@ async function openPdf(filePath) {
     if (!pdfSource) {
       showPdfError(
         `Không thể mở file:\n"${filename}"\n\n` +
-        `Vui lòng chạy server.py:\n  python server.py`
+        `Cách 1: Nhấn "Chọn thư mục PDF" → chọn thư mục chứa file PDF\n` +
+        `Cách 2: Chạy server.py trên máy tính:\n  python server.py`
       );
       return;
     }
