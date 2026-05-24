@@ -34,6 +34,19 @@
     .btn-pdf   { background: #dc2626; color: white; }
     .btn-search{ background: #f59e0b; color: #1a1a1a; }
 
+    .pdf-folder-chip {
+      display: inline-flex; align-items: center; gap: 5px;
+      background: rgba(255,255,255,0.18); color: white;
+      border-radius: 5px; padding: 4px 8px 4px 10px;
+      font-size: 0.78rem; white-space: nowrap; border: 1px solid rgba(255,255,255,0.25);
+    }
+    .pdf-folder-chip .chip-count { opacity: 0.75; font-size: 0.72rem; }
+    .pdf-folder-chip .chip-remove {
+      cursor: pointer; opacity: 0.6; font-size: 1.1rem; line-height: 1;
+      padding: 0 2px; margin-left: 2px;
+    }
+    .pdf-folder-chip .chip-remove:hover { opacity: 1; color: #fca5a5; }
+
     .search-wrap {
       flex: 1; min-width: 200px; position: relative;
     }
@@ -284,13 +297,14 @@
     </svg>
     Chọn thư mục Excel
   </button>
-  <button class="btn btn-pdf" id="btnPdfFolder" title="Chọn thư mục chứa file PDF để xem trực tiếp (không cần server.py)">
+  <button class="btn btn-pdf" id="btnAddPdfFolder" title="Thêm thư mục PDF (có thể chọn nhiều thư mục)">
     <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
       <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
-      <path d="M14 2v6h6M12 18v-6M9 15l3-3 3 3"/>
+      <path d="M14 2v6h6M12 12v6M9 15h6"/>
     </svg>
-    <span id="btnPdfFolderLabel">Chọn thư mục PDF</span>
+    + Thêm thư mục PDF
   </button>
+  <div id="pdfFolderChips" style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;"></div>
   <span class="btn-pdf-hint" id="pdfModeLabel" title="Chạy server.py để đọc file PDF cục bộ theo đường dẫn"></span>
 
   <div class="search-wrap">
@@ -445,8 +459,9 @@ let diagSuggestTimer = null;
 let pdfDoc      = null;
 let pdfCurPage  = 1;
 let pdfScale    = 1.0;  // 1.0 = fit-to-width (100%)
-const pdfCache  = new Map(); // filename → { url, doc }
-const pdfFileMap= new Map(); // filename (lowercase) → File object
+const pdfCache    = new Map(); // filename → { url, doc }
+const pdfFileMap  = new Map(); // filename (lowercase) → FileSystemFileHandle (gộp tất cả thư mục)
+const pdfFolders  = [];        // [{ dirName, map }] — danh sách thư mục đã chọn
 
 // ═══════════════════════════════════════════════════════════════
 //  INDEXEDDB CACHE (lưu file Excel qua reload)
@@ -1090,35 +1105,75 @@ function onRowClick(tr, idx) {
 // ═══════════════════════════════════════════════════════════════
 //  PDF FOLDER — File System Access API (không cần server.py)
 // ═══════════════════════════════════════════════════════════════
-async function scanPdfDir(dirHandle) {
+async function scanPdfDirInto(dirHandle, targetMap) {
   for await (const [name, handle] of dirHandle.entries()) {
     if (handle.kind === 'file' && /\.pdf$/i.test(name)) {
-      pdfFileMap.set(name.toLowerCase(), handle);
+      targetMap.set(name.toLowerCase(), handle);
     } else if (handle.kind === 'directory') {
-      await scanPdfDir(handle);   // quét đệ quy thư mục con
+      await scanPdfDirInto(handle, targetMap);
     }
   }
 }
 
-document.getElementById('btnPdfFolder').onclick = async function() {
+// Gộp tất cả folder map vào pdfFileMap
+function rebuildPdfFileMap() {
+  pdfFileMap.clear();
+  for (const f of pdfFolders)
+    for (const [k, v] of f.map) pdfFileMap.set(k, v);
+}
+
+// Render chip cho từng thư mục đã chọn
+function renderFolderChips() {
+  const container = document.getElementById('pdfFolderChips');
+  if (!pdfFolders.length) { container.innerHTML = ''; return; }
+  container.innerHTML = pdfFolders.map((f, i) =>
+    `<span class="pdf-folder-chip" title="${escHtml(f.dirName)}">
+      📁 ${escHtml(f.dirName)}
+      <span class="chip-count">(${f.map.size})</span>
+      <span class="chip-remove" onclick="removePdfFolder(${i})" title="Xóa thư mục này">×</span>
+    </span>`
+  ).join('');
+}
+
+function removePdfFolder(idx) {
+  pdfFolders.splice(idx, 1);
+  pdfCache.clear();
+  rebuildPdfFileMap();
+  renderFolderChips();
+}
+
+document.getElementById('btnAddPdfFolder').onclick = async function() {
   if (!window.showDirectoryPicker) {
     alert('Tính năng này cần Chrome hoặc Edge (phiên bản 86 trở lên).\nFirefox chưa hỗ trợ.');
     return;
   }
   try {
-    const lbl = document.getElementById('btnPdfFolderLabel');
     const dirHandle = await window.showDirectoryPicker({ mode: 'read' });
-    pdfFileMap.clear();
-    pdfCache.clear();
-    lbl.textContent = 'Đang quét...';
-    await scanPdfDir(dirHandle);
-    const count = pdfFileMap.size;
-    lbl.textContent = count > 0 ? `PDF: ${count} file` : 'Chọn thư mục PDF';
-    if (count === 0)
+
+    // Thêm chip "đang quét" tạm thời
+    const tempChip = document.createElement('span');
+    tempChip.className = 'pdf-folder-chip';
+    tempChip.textContent = `⏳ Đang quét "${dirHandle.name}"...`;
+    document.getElementById('pdfFolderChips').appendChild(tempChip);
+
+    const folderMap = new Map();
+    await scanPdfDirInto(dirHandle, folderMap);
+    tempChip.remove();
+
+    if (folderMap.size === 0) {
       alert(`Không tìm thấy file .pdf nào trong "${dirHandle.name}".`);
+      return;
+    }
+
+    pdfFolders.push({ dirName: dirHandle.name, map: folderMap });
+    pdfCache.clear();
+    rebuildPdfFileMap();
+    renderFolderChips();
   } catch(e) {
+    document.querySelectorAll('.pdf-folder-chip').forEach(c => {
+      if (c.textContent.startsWith('⏳')) c.remove();
+    });
     if (e.name !== 'AbortError') alert('Lỗi: ' + e.message);
-    document.getElementById('btnPdfFolderLabel').textContent = 'Chọn thư mục PDF';
   }
 };
 
