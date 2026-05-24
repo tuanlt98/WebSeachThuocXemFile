@@ -55,33 +55,79 @@ Dừng server: nhấn `Ctrl+C` trong terminal.
 
 ## Deploy lên GitHub Pages (không xem được PDF local)
 
-### Bước 1: Tạo repository
-1. Vào [github.com](https://github.com) → **New repository**
-2. Đặt tên repo (ví dụ: `thuoc-search`), chọn **Public**
-3. Nhấn **Create repository**
+> **Giới hạn:** Tìm kiếm Excel hoạt động bình thường. Xem PDF file cục bộ (`E:\...`) **không hoạt động** trên GitHub Pages — cần chạy `server.py` ở máy tính.
 
-### Bước 2: Push code
+---
+
+### Bước 1: Tạo repository trên GitHub
+
+1. Đăng nhập [github.com](https://github.com)
+2. Nhấn nút **"+"** góc trên phải → **New repository**
+3. Điền thông tin:
+   - **Repository name**: đặt tên (ví dụ: `WebSeachThuocXemFile`)
+   - **Visibility**: chọn **Public**
+   - **KHÔNG tick** "Add a README file", "Add .gitignore", "Choose a license"
+4. Nhấn **Create repository**
+
+---
+
+### Bước 2: Khởi tạo git và commit (chạy 1 lần duy nhất)
+
+Mở terminal trong thư mục chứa project, chạy lần lượt:
+
 ```bash
 git init
-git add index.html
-git commit -m "first commit"
+git add index.html server.py README.md
+git commit -m "Initial commit"
 git branch -M main
 git remote add origin https://github.com/TEN_BAN/TEN_REPO.git
 git push -u origin main
 ```
-> Thay `TEN_BAN` và `TEN_REPO` bằng tên GitHub và tên repo của bạn.
+
+> Thay `TEN_BAN` bằng GitHub username và `TEN_REPO` bằng tên repo vừa tạo.
+>
+> Lần đầu push: trình duyệt sẽ hiện cửa sổ đăng nhập GitHub → đăng nhập vào là xong.
+
+---
 
 ### Bước 3: Bật GitHub Pages
-1. Vào repo → **Settings** → **Pages**
-2. **Source**: `Deploy from a branch`
-3. Branch: `main` / folder: `/ (root)` → **Save**
+
+1. Vào repo trên GitHub → tab **Settings**
+2. Kéo xuống phần **Pages** (menu bên trái)
+3. Mục **Source**: chọn `Deploy from a branch`
+4. Mục **Branch**: đổi từ `None` → **`main`**, folder giữ nguyên `/ (root)`
+5. Nhấn **Save**
+
+> **Lưu ý:** Nút "Start free for 30 days" trên trang đó là quảng cáo GitHub Enterprise — **bỏ qua**, không cần nhấn.
+
+---
 
 ### Bước 4: Truy cập
+
+Chờ ~1–2 phút (GitHub build lần đầu), sau đó mở:
+
 ```
 https://TEN_BAN.github.io/TEN_REPO/
 ```
 
-> Trên GitHub Pages: tìm kiếm và xem dữ liệu Excel hoạt động bình thường. Xem PDF local (`E:\...`) chỉ hoạt động khi chạy qua `server.py`.
+Ví dụ thực tế:
+```
+https://tuanlt98.github.io/WebSeachThuocXemFile/
+```
+
+---
+
+### Cập nhật code sau này
+
+Khi sửa `index.html` và muốn cập nhật lên GitHub Pages:
+
+```bash
+git add index.html
+git commit -m "Mô tả thay đổi"
+git push
+```
+
+GitHub Pages tự động deploy lại sau ~1 phút.
 
 ---
 
@@ -111,5 +157,5 @@ https://TEN_BAN.github.io/TEN_REPO/
 - **Worker pool**: `min(CPU cores, 4)` workers xử lý song song
 - **Search index**: hai mảng `searchIdx[]` và `diagIdx[]` đã normalize sẵn, tìm kiếm `includes()` trên 400k+ dòng < 50ms
 - **PDF viewer**: PDF.js 3.11.174
-- **Cache**: IndexedDB lưu ArrayBuffer của từng file Excel
+- **Cache**: IndexedDB lưu cả ArrayBuffer file Excel lẫn dữ liệu đã parse sẵn — reload trang khôi phục ngay lập tức, không parse lại
 - **Local file server**: Python `http.server` mở rộng với endpoint `/local-file?path=...`, hỗ trợ Unicode NFC normalization và fuzzy path matching
